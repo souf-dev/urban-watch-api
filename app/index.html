@@ -10,7 +10,7 @@
       --bg: #0a0b0d;
       --surface: #111318;
       --border: #1e2230;
-      --accent: #e8ff47;
+      --accent: #00C853;
       --accent2: #ff4747;
       --text: #d0d4e0;
       --muted: #4a5068;
@@ -279,11 +279,6 @@
       animation: slideIn .25s ease both;
     }
 
-    .detection-item.rust { border-left-color: #ff6a00; }
-    .detection-item.scratch { border-left-color: #ffcc00; }
-    .detection-item.hole { border-left-color: #ff4747; }
-    .detection-item.crack { border-left-color: var(--accent); }
-
     .det-label {
       font-family: var(--display);
       font-size: 15px;
@@ -502,12 +497,14 @@
       if (data.detections && data.detections.length > 0) {
         data.detections.forEach((det, i) => {
           const item = document.createElement('div');
-          item.className = `detection-item ${det.label.toLowerCase()}`;
+          const color = det.color || 'var(--accent)';
+          item.className = 'detection-item';
+          item.style.borderLeftColor = color;
           item.style.animationDelay = `${i * 60}ms`;
           item.innerHTML = `
-            <span class="det-label">${det.label}</span>
-            <span class="det-conf">${(det.confidence * 100).toFixed(0)}%</span>
-            <span class="det-box">box [${det.box.map(v => Math.round(v)).join(', ')}]${det.mask_path ? ' · mask saved' : ''}</span>
+            <span class="det-label" style="color:${color}">${det.label}</span>
+            <span class="det-conf" style="color:${color}">${(det.confidence * 100).toFixed(0)}%</span>
+            <span class="det-box">box [${det.box.map(v => Math.round(v)).join(', ')}]</span>
           `;
           detList.appendChild(item);
         });

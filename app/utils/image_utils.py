@@ -5,7 +5,6 @@ Image utilities — draw detections on images and persist results.
 from __future__ import annotations
 
 import uuid
-from pathlib import Path
 
 import cv2
 import numpy as np
@@ -17,7 +16,7 @@ from app.services.model_service import Detection
 _COLOURS: list[tuple[int, int, int]] = [
     (0, 0, 255),      # red
     (0, 165, 255),    # orange
-    (0, 255, 255),    # yellow
+    (83, 200, 0),     # green (#00C853)
     (0, 255, 0),      # green
     (255, 0, 0),      # blue
     (255, 0, 255),    # magenta
@@ -26,6 +25,12 @@ _COLOURS: list[tuple[int, int, int]] = [
 
 def _colour_for(index: int) -> tuple[int, int, int]:
     return _COLOURS[index % len(_COLOURS)]
+
+
+def colour_hex_for(index: int) -> str:
+    """Return the display hex colour matching the BGR annotation palette."""
+    blue, green, red = _colour_for(index)
+    return f"#{red:02X}{green:02X}{blue:02X}"
 
 
 # ──────────────────────────────────────────────
@@ -94,12 +99,4 @@ def save_result_image(image: np.ndarray, prefix: str = "result") -> str:
     filename = f"{prefix}_{uuid.uuid4().hex}.png"
     filepath = OUTPUTS_DIR / filename
     cv2.imwrite(str(filepath), image)
-    return f"outputs/{filename}"
-
-
-def save_mask(mask: np.ndarray, index: int) -> str:
-    """Save a single binary mask to the outputs directory. Returns the relative path."""
-    filename = f"mask_{index}_{uuid.uuid4().hex}.png"
-    filepath = OUTPUTS_DIR / filename
-    cv2.imwrite(str(filepath), mask)
     return f"outputs/{filename}"

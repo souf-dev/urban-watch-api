@@ -1,0 +1,11 @@
+.git
+.venv
+.venv310
+venv
+__pycache__
+*.pyc
+.pytest_cache
+.mypy_cache
+outputs
+checkpoints
+assets

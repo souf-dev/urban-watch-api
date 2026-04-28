@@ -25,7 +25,7 @@ def test_detect_returns_success(client, small_image_bytes):
 
 
 def test_detect_detections_have_required_fields(client, small_image_bytes):
-    """Each detection must include label, confidence, box, and mask_path."""
+    """Each detection must include label, confidence, box, and display color."""
     response = client.post(
         "/detect-anomalies",
         files={"image": ("test.jpg", io.BytesIO(small_image_bytes), "image/jpeg")},
@@ -35,7 +35,7 @@ def test_detect_detections_have_required_fields(client, small_image_bytes):
         assert "label" in det
         assert "confidence" in det
         assert "box" in det
-        assert "mask_path" in det
+        assert "color" in det
 
 
 def test_detect_box_has_four_coords(client, small_image_bytes):
@@ -58,18 +58,6 @@ def test_detect_confidence_in_range(client, small_image_bytes):
     assert response.status_code == 200
     for det in response.json()["detections"]:
         assert 0.0 <= det["confidence"] <= 1.0
-
-
-def test_detect_mask_path_in_outputs(client, small_image_bytes):
-    """Mask paths (when present) must point inside the outputs/ directory."""
-    response = client.post(
-        "/detect-anomalies",
-        files={"image": ("test.jpg", io.BytesIO(small_image_bytes), "image/jpeg")},
-    )
-    assert response.status_code == 200
-    for det in response.json()["detections"]:
-        if det["mask_path"] is not None:
-            assert det["mask_path"].startswith("outputs/")
 
 
 # ──────────────────────────────────────────────

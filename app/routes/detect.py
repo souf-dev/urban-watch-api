@@ -2,8 +2,7 @@
 POST /detect-anomalies
 
 Accepts an uploaded image, runs the Grounded-SAM2 pipeline, and returns
-detected anomalies with their bounding boxes, masks, and a final annotated
-image.
+detected anomalies with their bounding boxes and a final annotated image.
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from fastapi import APIRouter, File, HTTPException, UploadFile
 
 from app.config.settings import MAX_UPLOAD_BYTES
 from app.services.model_service import model_service
-from app.utils.image_utils import draw_detections, save_mask, save_result_image
+from app.utils.image_utils import colour_hex_for, draw_detections, save_result_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -86,13 +85,12 @@ async def detect_anomalies(image: UploadFile = File(...)):
 
     detections_payload: list[dict] = []
     for idx, det in enumerate(result.detections):
-        mask_path = save_mask(det.mask, idx) if det.mask is not None else None
         detections_payload.append(
             {
                 "label": det.label,
                 "confidence": det.confidence,
                 "box": det.box,
-                "mask_path": mask_path,
+                "color": colour_hex_for(idx),
             }
         )
 

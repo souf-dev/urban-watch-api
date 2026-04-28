@@ -14,6 +14,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
+from importlib.util import find_spec
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -21,6 +24,11 @@ import torch
 from app.config.settings import (
     BOX_THRESHOLD,
     DEVICE,
+    GROUNDING_DINO_CHECKPOINT,
+    GROUNDING_DINO_CONFIG,
+    PROJECT_ROOT,
+    SAM2_CHECKPOINT,
+    SAM2_CONFIG,
     TEXT_PROMPT,
     TEXT_THRESHOLD,
 )
@@ -63,8 +71,8 @@ class ModelService:
 
     def __init__(self) -> None:
         self._device: str = DEVICE if torch.cuda.is_available() else "cpu"
-        self._grounding_model = None
-        self._sam2_predictor = None
+        self._grounding_model: Any | None = None
+        self._sam2_predictor: Any | None = None
         self._is_loaded = False
 
         logger.info("ModelService created — device=%s", self._device)
@@ -73,28 +81,35 @@ class ModelService:
     def load_models(self) -> None:
         """
         Load GroundingDINO + SAM2 weights.
-
-        TODO: Replace the placeholder below with real model loading once
-        checkpoints are downloaded.  Example (pseudocode):
-
-            from groundingdino.util.inference import load_model as load_gd
-            self._grounding_model = load_gd(
-                GROUNDING_DINO_CONFIG, GROUNDING_DINO_CHECKPOINT
-            )
-
-            from sam2.build_sam import build_sam2
-            from sam2.sam2_image_predictor import SAM2ImagePredictor
-            sam2_model = build_sam2(SAM2_CONFIG, SAM2_CHECKPOINT, device=self._device)
-            self._sam2_predictor = SAM2ImagePredictor(sam2_model)
-
-        Performance tip: load both models in torch.float16 on CUDA:
-            sam2_model = build_sam2(..., device=self._device)
-            sam2_model.half()
         """
-        logger.warning(
-            "⚠️  Real model weights not loaded — using placeholder inference. "
-            "Plug in real checkpoints to enable actual detection."
+        from groundingdino.util.inference import load_model as load_grounding_model
+        from sam2.build_sam import build_sam2
+        from sam2.sam2_image_predictor import SAM2ImagePredictor
+
+        grounding_config = self._resolve_path(
+            GROUNDING_DINO_CONFIG, package_name="groundingdino"
         )
+        grounding_checkpoint = self._resolve_path(GROUNDING_DINO_CHECKPOINT)
+        sam2_checkpoint = self._resolve_path(SAM2_CHECKPOINT)
+
+        self._require_file(grounding_config, "GroundingDINO config")
+        self._require_file(grounding_checkpoint, "GroundingDINO checkpoint")
+        self._require_file(sam2_checkpoint, "SAM2 checkpoint")
+
+        logger.info("Loading GroundingDINO from %s", grounding_checkpoint)
+        self._grounding_model = load_grounding_model(
+            str(grounding_config),
+            str(grounding_checkpoint),
+            device=self._device,
+        )
+
+        logger.info("Loading SAM2 from %s", sam2_checkpoint)
+        sam2_model = build_sam2(
+            SAM2_CONFIG,
+            str(sam2_checkpoint),
+            device=self._device,
+        )
+        self._sam2_predictor = SAM2ImagePredictor(sam2_model)
         self._is_loaded = True
 
     # ── Inference ────────────────────────────
@@ -124,42 +139,115 @@ class ModelService:
         # TEXT_PROMPT is a module-level constant built once at import time.
         logger.info("Running inference — prompt: %s", TEXT_PROMPT)
 
-        # ----- Real pipeline (uncomment when weights are available) -----
-        # return self._run_real_inference(image)
-
-        # ----- Placeholder pipeline -----
-        return self._run_placeholder_inference(image)
+        return self._run_real_inference(image)
 
     # ── Real pipeline (template) ─────────────
     def _run_real_inference(self, image: np.ndarray) -> InferenceResult:
         """
-        Template for the real Grounded-SAM2 pipeline.
+        Run GroundingDINO for boxes, then SAM2 for masks.
+        """
+        import cv2
+        import groundingdino.datasets.transforms as T
+        from groundingdino.util.inference import predict
+        from PIL import Image
+        from torchvision.ops import box_convert
 
-        Step 1 — GroundingDINO:
+        image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+        height, width = image_rgb.shape[:2]
+
+        transform = T.Compose(
+            [
+                T.RandomResize([800], max_size=1333),
+                T.ToTensor(),
+                T.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225]),
+            ]
+        )
+        image_tensor, _ = transform(Image.fromarray(image_rgb), None)
+
+        with torch.inference_mode():
             boxes, scores, labels = predict(
                 model=self._grounding_model,
-                image=image_transformed,
+                image=image_tensor,
                 caption=TEXT_PROMPT,
                 box_threshold=BOX_THRESHOLD,
                 text_threshold=TEXT_THRESHOLD,
+                device=self._device,
             )
 
-        Step 2 — SAM2 (pass all boxes at once for best throughput):
-            self._sam2_predictor.set_image(image_rgb)
-            masks, _, _ = self._sam2_predictor.predict(
-                box=boxes_xyxy,          # shape (N, 4) — batch all at once
+        if len(boxes) == 0:
+            return InferenceResult(detections=[])
+
+        boxes_xyxy = box_convert(boxes, in_fmt="cxcywh", out_fmt="xyxy")
+        scale = torch.tensor(
+            [width, height, width, height],
+            dtype=boxes_xyxy.dtype,
+            device=boxes_xyxy.device,
+        )
+        boxes_xyxy = boxes_xyxy * scale
+        boxes_xyxy[:, 0::2] = boxes_xyxy[:, 0::2].clamp(0, width - 1)
+        boxes_xyxy[:, 1::2] = boxes_xyxy[:, 1::2].clamp(0, height - 1)
+        boxes_np = boxes_xyxy.cpu().numpy()
+
+        sam2_predictor = self._sam2_predictor
+        if sam2_predictor is None:
+            raise RuntimeError("SAM2 predictor was not loaded.")
+
+        sam2_predictor.set_image(image_rgb)
+        with torch.inference_mode():
+            masks, _, _ = sam2_predictor.predict(
+                box=boxes_np,
                 multimask_output=False,
             )
 
-        Performance tips:
-            - Keep both models in float16 on CUDA.
-            - Use torch.compile() on the GroundingDINO forward pass (PyTorch 2+).
-            - Pass all boxes to SAM2 in one call, never loop.
-        """
-        raise NotImplementedError(
-            "Real model inference is not yet wired — "
-            "download checkpoints and uncomment _run_real_inference."
-        )
+        detections: list[Detection] = []
+        for idx, box in enumerate(boxes_np):
+            mask = masks[idx]
+            if mask.ndim == 3:
+                mask = mask[0]
+
+            detections.append(
+                Detection(
+                    label=labels[idx],
+                    confidence=float(scores[idx]),
+                    box=[float(value) for value in box.tolist()],
+                    mask=(mask.astype(np.uint8) * 255),
+                )
+            )
+
+        return InferenceResult(detections=detections)
+
+    @staticmethod
+    def _resolve_path(value: str, package_name: str | None = None) -> Path:
+        path = Path(value).expanduser()
+        if path.is_absolute():
+            return path
+
+        project_path = PROJECT_ROOT / path
+        if project_path.exists():
+            return project_path
+
+        if package_name:
+            spec = find_spec(package_name)
+            if spec and spec.origin:
+                package_root = Path(spec.origin).resolve().parent
+                package_path = package_root.parent / path
+                if package_path.exists():
+                    return package_path
+
+                if path.parts and path.parts[0] == package_name:
+                    stripped_path = package_root.joinpath(*path.parts[1:])
+                    if stripped_path.exists():
+                        return stripped_path
+
+        return project_path
+
+    @staticmethod
+    def _require_file(path: Path, label: str) -> None:
+        if not path.is_file():
+            raise FileNotFoundError(
+                f"{label} not found: {path}. Download the file or set the "
+                "matching environment variable."
+            )
 
     # ── Placeholder pipeline ─────────────────
     @staticmethod
@@ -180,10 +268,10 @@ class ModelService:
         detections: list[Detection] = []
         for i, (label, confidence) in enumerate(sample_detections):
             # generate a plausible box in the image
-            x1 = int(rng.integers(0, w // 2))
-            y1 = int(rng.integers(0, h // 2))
-            x2 = int(rng.integers(w // 2, w))
-            y2 = int(rng.integers(h // 2, h))
+            x1 = rng.integers(0, w // 2)
+            y1 = rng.integers(0, h // 2)
+            x2 = rng.integers(w // 2, w)
+            y2 = rng.integers(h // 2, h)
 
             # generate a simple elliptical mask inside the box
             mask = np.zeros((h, w), dtype=np.uint8)
