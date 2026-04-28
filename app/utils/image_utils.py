@@ -4,8 +4,6 @@ Image utilities — draw detections on images and persist results.
 
 from __future__ import annotations
 
-import uuid
-
 import cv2
 import numpy as np
 
@@ -84,8 +82,7 @@ def draw_detections(
 
 def save_result_image(image: np.ndarray, prefix: str = "result") -> str:
     """Save an annotated image to the outputs directory. Returns the relative path."""
-    # Full UUID (32 hex chars) eliminates collision risk under concurrent load
-    filename = f"{prefix}_{uuid.uuid4().hex}.png"
+    filename = f"{prefix}.png"
     filepath = OUTPUTS_DIR / filename
     cv2.imwrite(str(filepath), image)
     return f"outputs/{filename}"
