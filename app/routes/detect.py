@@ -8,12 +8,14 @@ image.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 import cv2
 import numpy as np
 from fastapi import APIRouter, File, HTTPException, UploadFile
 
+from app.config.settings import MAX_UPLOAD_BYTES
 from app.services.model_service import model_service
 from app.utils.image_utils import draw_detections, save_mask, save_result_image
 
@@ -30,19 +32,31 @@ async def detect_anomalies(image: UploadFile = File(...)):
 
     **Returns**: JSON with detection results and paths to output images.
     """
-    # ── 1. Validate & decode the uploaded image ──────────────────
+    # ── 1. Validate content type ─────────────────────────────────
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(
             status_code=400,
             detail=f"Expected an image file, got {image.content_type}",
         )
 
+    # ── 2. Read & size-guard ──────────────────────────────────────
     contents = await image.read()
+
     if not contents:
         raise HTTPException(status_code=400, detail="Uploaded file is empty.")
 
+    if len(contents) > MAX_UPLOAD_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Image too large. Maximum allowed size is {MAX_UPLOAD_BYTES // (1024 * 1024)} MB.",
+        )
+
+    # ── 3. Decode image ───────────────────────────────────────────
     np_arr = np.frombuffer(contents, dtype=np.uint8)
+    contents = None  # release raw bytes from memory as soon as possible
+
     img_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+    np_arr = None  # release the intermediate buffer
 
     if img_bgr is None:
         raise HTTPException(
@@ -57,10 +71,16 @@ async def detect_anomalies(image: UploadFile = File(...)):
         img_bgr.shape[0],
     )
 
-    # ── 2. Run Grounded-SAM2 inference ───────────────────────────
-    result = model_service.run_inference(img_bgr)
+    # ── 4. Run inference off the event loop ───────────────────────
+    # model_service.run_inference is synchronous and CPU/GPU-bound.
+    # run_in_executor dispatches it to a thread-pool so the async event
+    # loop (and all other concurrent requests) are never blocked.
+    loop = asyncio.get_event_loop()
+    result = await loop.run_in_executor(
+        None, model_service.run_inference, img_bgr
+    )
 
-    # ── 3. Draw detections & save outputs ────────────────────────
+    # ── 5. Draw detections & save outputs ────────────────────────
     annotated = draw_detections(img_bgr, result.detections)
     final_image_path = save_result_image(annotated)
 
@@ -76,7 +96,7 @@ async def detect_anomalies(image: UploadFile = File(...)):
             }
         )
 
-    # ── 4. Respond ───────────────────────────────────────────────
+    # ── 6. Respond ────────────────────────────────────────────────
     return {
         "success": True,
         "detections": detections_payload,
