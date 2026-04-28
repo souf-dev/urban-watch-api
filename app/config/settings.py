@@ -56,6 +56,9 @@ SAM2_CONFIG = "sam2_hiera_l.yaml"
 BOX_THRESHOLD = 0.30
 TEXT_THRESHOLD = 0.25
 
+# Upload limits
+MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
+
 # Device
 DEVICE = "cuda"  # falls back to cpu at runtime if unavailable
 

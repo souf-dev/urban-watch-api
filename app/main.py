@@ -10,6 +10,7 @@ import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config.settings import OUTPUTS_DIR
@@ -49,6 +50,12 @@ app = FastAPI(
 
 # Serve the /outputs directory so clients can fetch result images directly
 app.mount("/outputs", StaticFiles(directory=str(OUTPUTS_DIR)), name="outputs")
+
+@app.get("/")
+async def serve_index():
+    """Serve the frontend dashboard."""
+    import os
+    return FileResponse(os.path.join("app", "index.html"))
 
 # Register routes
 app.include_router(detect_router)

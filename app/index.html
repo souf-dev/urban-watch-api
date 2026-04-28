@@ -1,0 +1,534 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Urban Watch — Anomaly Detection</title>
+  <link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;600;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0b0d;
+      --surface: #111318;
+      --border: #1e2230;
+      --accent: #e8ff47;
+      --accent2: #ff4747;
+      --text: #d0d4e0;
+      --muted: #4a5068;
+      --mono: 'Share Tech Mono', monospace;
+      --display: 'Barlow Condensed', sans-serif;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 13px;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Scanline overlay ── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background: repeating-linear-gradient(
+        0deg,
+        transparent,
+        transparent 2px,
+        rgba(0,0,0,.15) 2px,
+        rgba(0,0,0,.15) 4px
+      );
+      pointer-events: none;
+      z-index: 9999;
+    }
+
+    /* ── Header ── */
+    header {
+      border-bottom: 1px solid var(--border);
+      padding: 20px 36px;
+      display: flex;
+      align-items: baseline;
+      gap: 16px;
+      animation: slideDown .4s ease both;
+    }
+
+    header h1 {
+      font-family: var(--display);
+      font-size: 32px;
+      font-weight: 800;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      color: #fff;
+    }
+
+    header h1 span { color: var(--accent); }
+
+    .version-tag {
+      font-size: 10px;
+      color: var(--muted);
+      letter-spacing: .15em;
+      border: 1px solid var(--border);
+      padding: 2px 8px;
+    }
+
+    /* ── Layout ── */
+    main {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0;
+      height: calc(100vh - 69px);
+    }
+
+    @media (max-width: 900px) {
+      main { grid-template-columns: 1fr; height: auto; }
+    }
+
+    /* ── Panel base ── */
+    .panel {
+      border-right: 1px solid var(--border);
+      padding: 28px 32px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      animation: fadeIn .5s ease both;
+    }
+
+    .panel:last-child { border-right: none; }
+
+    .panel-label {
+      font-size: 10px;
+      letter-spacing: .2em;
+      color: var(--muted);
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .panel-label::before {
+      content: '';
+      display: inline-block;
+      width: 6px; height: 6px;
+      background: var(--accent);
+    }
+
+    /* ── Drop zone ── */
+    #drop-zone {
+      flex: 1;
+      border: 1px dashed var(--border);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      cursor: pointer;
+      transition: border-color .2s, background .2s;
+      position: relative;
+      overflow: hidden;
+      min-height: 260px;
+    }
+
+    #drop-zone:hover,
+    #drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(232,255,71,.03);
+    }
+
+    #drop-zone .dz-icon {
+      font-size: 36px;
+      opacity: .3;
+      transition: opacity .2s;
+    }
+
+    #drop-zone:hover .dz-icon { opacity: .7; }
+
+    #drop-zone .dz-text {
+      font-family: var(--display);
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: var(--muted);
+    }
+
+    #drop-zone .dz-sub {
+      font-size: 11px;
+      color: var(--muted);
+      opacity: .6;
+    }
+
+    #drop-zone img#preview {
+      position: absolute;
+      inset: 0;
+      width: 100%; height: 100%;
+      object-fit: contain;
+      background: var(--bg);
+    }
+
+    #file-input { display: none; }
+
+    /* ── Controls ── */
+    .controls {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    button {
+      font-family: var(--mono);
+      font-size: 12px;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      cursor: pointer;
+      border: none;
+      padding: 10px 24px;
+      transition: all .15s;
+    }
+
+    #btn-scan {
+      background: var(--accent);
+      color: #0a0b0d;
+      font-weight: bold;
+      flex: 1;
+    }
+
+    #btn-scan:hover:not(:disabled) {
+      background: #fff;
+      transform: translateY(-1px);
+    }
+
+    #btn-scan:disabled {
+      opacity: .35;
+      cursor: not-allowed;
+    }
+
+    #btn-clear {
+      background: transparent;
+      color: var(--muted);
+      border: 1px solid var(--border);
+    }
+
+    #btn-clear:hover { border-color: var(--accent2); color: var(--accent2); }
+
+    /* ── Status bar ── */
+    #status-bar {
+      font-size: 11px;
+      color: var(--muted);
+      height: 18px;
+      letter-spacing: .05em;
+      transition: color .2s;
+    }
+
+    #status-bar.running { color: var(--accent); }
+    #status-bar.error { color: var(--accent2); }
+    #status-bar.done { color: #4aff9e; }
+
+    /* ── Result panel ── */
+    #result-image-wrap {
+      flex: 1;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 260px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    #result-image-wrap .placeholder-text {
+      font-family: var(--display);
+      font-size: 16px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--muted);
+      opacity: .4;
+    }
+
+    #result-image {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      display: none;
+    }
+
+    /* ── Detections list ── */
+    #detections-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    #detections-list::-webkit-scrollbar { width: 4px; }
+    #detections-list::-webkit-scrollbar-track { background: var(--bg); }
+    #detections-list::-webkit-scrollbar-thumb { background: var(--border); }
+
+    .detection-item {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 10px 14px;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 4px;
+      animation: slideIn .25s ease both;
+    }
+
+    .detection-item.rust { border-left-color: #ff6a00; }
+    .detection-item.scratch { border-left-color: #ffcc00; }
+    .detection-item.hole { border-left-color: #ff4747; }
+    .detection-item.crack { border-left-color: var(--accent); }
+
+    .det-label {
+      font-family: var(--display);
+      font-size: 15px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #fff;
+    }
+
+    .det-conf {
+      font-size: 12px;
+      color: var(--accent);
+      font-weight: bold;
+      align-self: start;
+    }
+
+    .det-box {
+      font-size: 10px;
+      color: var(--muted);
+      grid-column: 1 / -1;
+      margin-top: 2px;
+    }
+
+    /* ── Loading spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+
+    /* ── API URL input ── */
+    .api-url-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--border);
+      padding: 8px 12px;
+    }
+
+    .api-url-row label {
+      font-size: 10px;
+      letter-spacing: .12em;
+      color: var(--muted);
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    .api-url-row input {
+      flex: 1;
+      background: transparent;
+      border: none;
+      outline: none;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+    }
+
+    /* ── Animations ── */
+    @keyframes slideDown { from { transform: translateY(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideIn { from { transform: translateX(-8px); opacity: 0; } to { transform: none; opacity: 1; } }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .4; } }
+
+    .pulsing { animation: pulse 1.2s ease infinite; }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Urban <span>Watch</span></h1>
+  <span class="version-tag">v0.1.0 · ANOMALY DETECTION</span>
+</header>
+
+<main>
+
+  <!-- ── LEFT: Upload panel ── -->
+  <div class="panel">
+    <div class="panel-label">Input Image</div>
+
+    <div class="api-url-row">
+      <label>API</label>
+      <input id="api-url" type="text" value="http://localhost:8000" spellcheck="false" />
+    </div>
+
+    <div id="drop-zone" role="button" tabindex="0" aria-label="Upload image">
+      <span class="dz-icon">⬡</span>
+      <span class="dz-text">Drop image here</span>
+      <span class="dz-sub">or click to browse · JPG / PNG / BMP · max 20 MB</span>
+      <img id="preview" alt="preview" />
+    </div>
+
+    <input type="file" id="file-input" accept="image/*" />
+
+    <div class="controls">
+      <button id="btn-scan" disabled>Scan for anomalies</button>
+      <button id="btn-clear">Clear</button>
+    </div>
+
+    <div id="status-bar">— ready</div>
+  </div>
+
+  <!-- ── RIGHT: Results panel ── -->
+  <div class="panel">
+    <div class="panel-label">Detection Result</div>
+
+    <div id="result-image-wrap">
+      <span class="placeholder-text">Awaiting scan</span>
+      <img id="result-image" alt="Annotated result" />
+    </div>
+
+    <div class="panel-label" style="margin-top:4px">Detections</div>
+    <div id="detections-list"></div>
+  </div>
+
+</main>
+
+<script>
+  const dropZone = document.getElementById('drop-zone');
+  const fileInput = document.getElementById('file-input');
+  const preview = document.getElementById('preview');
+  const btnScan = document.getElementById('btn-scan');
+  const btnClear = document.getElementById('btn-clear');
+  const statusBar = document.getElementById('status-bar');
+  const resultImg = document.getElementById('result-image');
+  const detList = document.getElementById('detections-list');
+  const apiUrlInput = document.getElementById('api-url');
+
+  let selectedFile = null;
+
+  // ── File selection ──────────────────────────
+  dropZone.addEventListener('click', () => fileInput.click());
+  dropZone.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') fileInput.click(); });
+
+  dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+  dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+  dropZone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropZone.classList.remove('drag-over');
+    const file = e.dataTransfer.files[0];
+    if (file) setFile(file);
+  });
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) setFile(fileInput.files[0]);
+  });
+
+  function setFile(file) {
+    selectedFile = file;
+    const url = URL.createObjectURL(file);
+    preview.src = url;
+    preview.style.display = 'block';
+    btnScan.disabled = false;
+    setStatus(`ready — ${file.name} (${(file.size / 1024).toFixed(0)} KB)`, '');
+    clearResults();
+  }
+
+  // ── Clear ───────────────────────────────────
+  btnClear.addEventListener('click', () => {
+    selectedFile = null;
+    fileInput.value = '';
+    preview.src = '';
+    preview.style.display = 'none';
+    btnScan.disabled = true;
+    setStatus('— ready', '');
+    clearResults();
+  });
+
+  function clearResults() {
+    resultImg.style.display = 'none';
+    resultImg.src = '';
+    document.querySelector('#result-image-wrap .placeholder-text').style.display = '';
+    detList.innerHTML = '';
+  }
+
+  // ── Scan ────────────────────────────────────
+  btnScan.addEventListener('click', async () => {
+    if (!selectedFile) return;
+
+    const apiBase = apiUrlInput.value.replace(/\/$/, '');
+
+    btnScan.disabled = true;
+    setStatus('<span class="spinner"></span> Scanning…', 'running pulsing');
+
+    const formData = new FormData();
+    formData.append('image', selectedFile);
+
+    try {
+      const res = await fetch(`${apiBase}/detect-anomalies`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setStatus(`✖ Error ${res.status}: ${data.detail || 'Unknown error'}`, 'error');
+        btnScan.disabled = false;
+        return;
+      }
+
+      // Show annotated image
+      if (data.final_image) {
+        resultImg.src = `${apiBase}/${data.final_image}`;
+        resultImg.style.display = 'block';
+        document.querySelector('#result-image-wrap .placeholder-text').style.display = 'none';
+      }
+
+      // Render detections
+      detList.innerHTML = '';
+      if (data.detections && data.detections.length > 0) {
+        data.detections.forEach((det, i) => {
+          const item = document.createElement('div');
+          item.className = `detection-item ${det.label.toLowerCase()}`;
+          item.style.animationDelay = `${i * 60}ms`;
+          item.innerHTML = `
+            <span class="det-label">${det.label}</span>
+            <span class="det-conf">${(det.confidence * 100).toFixed(0)}%</span>
+            <span class="det-box">box [${det.box.map(v => Math.round(v)).join(', ')}]${det.mask_path ? ' · mask saved' : ''}</span>
+          `;
+          detList.appendChild(item);
+        });
+        setStatus(`✔ ${data.detections.length} anomal${data.detections.length === 1 ? 'y' : 'ies'} detected`, 'done');
+      } else {
+        detList.innerHTML = '<div style="color:var(--muted);font-size:11px;padding:10px 0">No anomalies detected.</div>';
+        setStatus('✔ Scan complete — no anomalies', 'done');
+      }
+
+    } catch (err) {
+      setStatus(`✖ Connection failed — is the server running at ${apiBase}?`, 'error');
+    }
+
+    btnScan.disabled = false;
+  });
+
+  // ── Helpers ─────────────────────────────────
+  function setStatus(html, cls) {
+    statusBar.innerHTML = html;
+    statusBar.className = cls;
+  }
+</script>
+</body>
+</html>
