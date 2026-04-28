@@ -16,11 +16,11 @@ from app.services.model_service import Detection
 # Colour palette — one per anomaly class (BGR)
 _COLOURS: list[tuple[int, int, int]] = [
     (0, 0, 255),      # red
-    (0, 165, 255),     # orange
-    (0, 255, 255),     # yellow
-    (0, 255, 0),       # green
-    (255, 0, 0),       # blue
-    (255, 0, 255),     # magenta
+    (0, 165, 255),    # orange
+    (0, 255, 255),    # yellow
+    (0, 255, 0),      # green
+    (255, 0, 0),      # blue
+    (255, 0, 255),    # magenta
 ]
 
 
@@ -40,6 +40,9 @@ def draw_detections(
     Overlay bounding boxes, labels, confidence scores, and semi-transparent
     masks on a copy of the input image.
 
+    Uses a single canvas + overlay pair. The overlay is blended once after
+    all masks are applied, avoiding redundant full-image copies per detection.
+
     Returns the annotated image (BGR, uint8).
     """
     canvas = image.copy()
@@ -49,7 +52,7 @@ def draw_detections(
         colour = _colour_for(idx)
         x1, y1, x2, y2 = map(int, det.box)
 
-        # ── Mask (semi-transparent fill) ──
+        # ── Mask (semi-transparent fill, applied to overlay) ──
         if det.mask is not None:
             mask_bool = det.mask.astype(bool)
             overlay[mask_bool] = colour
@@ -76,7 +79,7 @@ def draw_detections(
             cv2.LINE_AA,
         )
 
-    # Blend mask overlay at 40 % opacity
+    # Blend mask overlay at 40 % opacity — single pass for all detections
     cv2.addWeighted(overlay, 0.4, canvas, 0.6, 0, canvas)
     return canvas
 
@@ -87,7 +90,8 @@ def draw_detections(
 
 def save_result_image(image: np.ndarray, prefix: str = "result") -> str:
     """Save an annotated image to the outputs directory. Returns the relative path."""
-    filename = f"{prefix}_{uuid.uuid4().hex[:8]}.png"
+    # Full UUID (32 hex chars) eliminates collision risk under concurrent load
+    filename = f"{prefix}_{uuid.uuid4().hex}.png"
     filepath = OUTPUTS_DIR / filename
     cv2.imwrite(str(filepath), image)
     return f"outputs/{filename}"
@@ -95,7 +99,7 @@ def save_result_image(image: np.ndarray, prefix: str = "result") -> str:
 
 def save_mask(mask: np.ndarray, index: int) -> str:
     """Save a single binary mask to the outputs directory. Returns the relative path."""
-    filename = f"mask_{index}_{uuid.uuid4().hex[:8]}.png"
+    filename = f"mask_{index}_{uuid.uuid4().hex}.png"
     filepath = OUTPUTS_DIR / filename
     cv2.imwrite(str(filepath), mask)
     return f"outputs/{filename}"
