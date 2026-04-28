@@ -20,10 +20,9 @@ import torch
 
 from app.config.settings import (
     BOX_THRESHOLD,
-    DEFAULT_ANOMALIES,
     DEVICE,
+    TEXT_PROMPT,
     TEXT_THRESHOLD,
-    build_text_prompt,
 )
 
 logger = logging.getLogger(__name__)
@@ -56,6 +55,10 @@ class ModelService:
     """
     Singleton-style service that loads models once and exposes
     `run_inference(image)`.
+
+    Inference is intentionally synchronous — callers are responsible for
+    dispatching to a thread-pool executor so the async event loop is never
+    blocked (see routes/detect.py).
     """
 
     def __init__(self) -> None:
@@ -83,6 +86,10 @@ class ModelService:
             from sam2.sam2_image_predictor import SAM2ImagePredictor
             sam2_model = build_sam2(SAM2_CONFIG, SAM2_CHECKPOINT, device=self._device)
             self._sam2_predictor = SAM2ImagePredictor(sam2_model)
+
+        Performance tip: load both models in torch.float16 on CUDA:
+            sam2_model = build_sam2(..., device=self._device)
+            sam2_model.half()
         """
         logger.warning(
             "⚠️  Real model weights not loaded — using placeholder inference. "
@@ -94,6 +101,12 @@ class ModelService:
     def run_inference(self, image: np.ndarray) -> InferenceResult:
         """
         Run the full Grounded-SAM2 pipeline on an image.
+
+        This method is synchronous and CPU/GPU-bound. Always call it from a
+        thread-pool executor in async contexts:
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, model_service.run_inference, img)
 
         Parameters
         ----------
@@ -108,19 +121,17 @@ class ModelService:
         if not self._is_loaded:
             self.load_models()
 
-        text_prompt = build_text_prompt()
-        logger.info("Text prompt: %s", text_prompt)
+        # TEXT_PROMPT is a module-level constant built once at import time.
+        logger.info("Running inference — prompt: %s", TEXT_PROMPT)
 
         # ----- Real pipeline (uncomment when weights are available) -----
-        # return self._run_real_inference(image, text_prompt)
+        # return self._run_real_inference(image)
 
         # ----- Placeholder pipeline -----
         return self._run_placeholder_inference(image)
 
     # ── Real pipeline (template) ─────────────
-    def _run_real_inference(
-        self, image: np.ndarray, text_prompt: str
-    ) -> InferenceResult:
+    def _run_real_inference(self, image: np.ndarray) -> InferenceResult:
         """
         Template for the real Grounded-SAM2 pipeline.
 
@@ -128,17 +139,22 @@ class ModelService:
             boxes, scores, labels = predict(
                 model=self._grounding_model,
                 image=image_transformed,
-                caption=text_prompt,
+                caption=TEXT_PROMPT,
                 box_threshold=BOX_THRESHOLD,
                 text_threshold=TEXT_THRESHOLD,
             )
 
-        Step 2 — SAM2:
+        Step 2 — SAM2 (pass all boxes at once for best throughput):
             self._sam2_predictor.set_image(image_rgb)
             masks, _, _ = self._sam2_predictor.predict(
-                box=boxes_xyxy,
+                box=boxes_xyxy,          # shape (N, 4) — batch all at once
                 multimask_output=False,
             )
+
+        Performance tips:
+            - Keep both models in float16 on CUDA.
+            - Use torch.compile() on the GroundingDINO forward pass (PyTorch 2+).
+            - Pass all boxes to SAM2 in one call, never loop.
         """
         raise NotImplementedError(
             "Real model inference is not yet wired — "
