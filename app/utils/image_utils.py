@@ -42,25 +42,16 @@ def draw_detections(
     detections: list[Detection],
 ) -> np.ndarray:
     """
-    Overlay bounding boxes, labels, confidence scores, and semi-transparent
-    masks on a copy of the input image.
-
-    Uses a single canvas + overlay pair. The overlay is blended once after
-    all masks are applied, avoiding redundant full-image copies per detection.
+    Overlay bounding boxes, labels, and confidence scores on a copy of the
+    input image.
 
     Returns the annotated image (BGR, uint8).
     """
     canvas = image.copy()
-    overlay = image.copy()
 
     for idx, det in enumerate(detections):
         colour = _colour_for(idx)
         x1, y1, x2, y2 = map(int, det.box)
-
-        # ── Mask (semi-transparent fill, applied to overlay) ──
-        if det.mask is not None:
-            mask_bool = det.mask.astype(bool)
-            overlay[mask_bool] = colour
 
         # ── Bounding box ──
         cv2.rectangle(canvas, (x1, y1), (x2, y2), colour, 2)
@@ -84,8 +75,6 @@ def draw_detections(
             cv2.LINE_AA,
         )
 
-    # Blend mask overlay at 40 % opacity — single pass for all detections
-    cv2.addWeighted(overlay, 0.4, canvas, 0.6, 0, canvas)
     return canvas
 
 

@@ -32,10 +32,7 @@ DEFAULT_ANOMALIES: list[str] = [
     "fallen product",
     "misplaced product",
     "wet floor",
-    "dirty shelf",
     "overflowing trash bin",
-    "broken shelf",
-    "damaged sign",
 ]
 
 
