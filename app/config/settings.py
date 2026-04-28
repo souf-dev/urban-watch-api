@@ -3,6 +3,7 @@ Application settings and default configuration.
 """
 
 from pathlib import Path
+from typing import Optional, List
 
 
 # ──────────────────────────────────────────────
@@ -26,8 +27,6 @@ DEFAULT_ANOMALIES: list[str] = [
 ]
 
 
-from typing import Optional, List
-
 def build_text_prompt(anomalies: Optional[List[str]] = None) -> str:
     """
     Build a Grounding-DINO style text prompt from anomaly labels.
@@ -37,6 +36,12 @@ def build_text_prompt(anomalies: Optional[List[str]] = None) -> str:
     """
     labels = anomalies or DEFAULT_ANOMALIES
     return ". ".join(labels) + "."
+
+
+# ──────────────────────────────────────────────
+# Cached static prompt (built once at import time)
+# ──────────────────────────────────────────────
+TEXT_PROMPT: str = build_text_prompt()
 
 
 # ──────────────────────────────────────────────
@@ -53,3 +58,6 @@ TEXT_THRESHOLD = 0.25
 
 # Device
 DEVICE = "cuda"  # falls back to cpu at runtime if unavailable
+
+# Upload limits
+MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024  # 20 MB
