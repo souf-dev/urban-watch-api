@@ -74,14 +74,23 @@ SAM2_CONFIG = os.getenv(
 )
 
 # Inference thresholds
-BOX_THRESHOLD = 0.18
-TEXT_THRESHOLD = 0.15
+# FIX P4: raised from 0.18/0.15 to reduce false positives and cut SAM2 mask work
+BOX_THRESHOLD: float = 0.30
+TEXT_THRESHOLD: float = 0.25
 
 # Upload limits
-MAX_UPLOAD_BYTES = 20 * 1024 * 1024  # 20 MB
-
-# Device
-DEVICE = "cuda"  # falls back to cpu at runtime if unavailable
-
-# Upload limits
+# FIX B1: was declared twice (once untyped, once typed). Single declaration here.
 MAX_UPLOAD_BYTES: int = 20 * 1024 * 1024  # 20 MB
+
+# Maximum edge length before the image is downscaled prior to inference.
+# FIX P2: prevents 20 MB / 5000×4000 images from bloating tensor memory and
+#          SAM2 encoding time.  1920 px on the long side is a safe ceiling.
+MAX_INFERENCE_EDGE: int = 1920
+
+# Device preference — falls back to cpu at runtime if CUDA is unavailable.
+DEVICE = "cuda"
+
+# SAM2 embedding LRU cache size (number of distinct images kept in memory).
+# FIX P3: avoids re-encoding identical uploads.  Each entry holds a ViT
+#          feature map; keep small on constrained hardware.
+EMBEDDING_CACHE_SIZE: int = 8

@@ -31,6 +31,18 @@ async def detect_anomalies(image: UploadFile = File(...)):
 
     **Returns**: JSON with detection results and paths to output images.
     """
+    # ── 0. Guard: models must be loaded ─────────────────────────
+    # FIX B2 / B6: if startup loading failed (missing weights, OOM, …)
+    # return a clean 503 instead of an unhandled 500 traceback.
+    if not model_service.is_loaded:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Models are not loaded. Check that checkpoint files exist and "
+                "that the server started without errors."
+            ),
+        )
+
     # ── 1. Validate content type ─────────────────────────────────
     if image.content_type and not image.content_type.startswith("image/"):
         raise HTTPException(
@@ -74,7 +86,12 @@ async def detect_anomalies(image: UploadFile = File(...)):
     # model_service.run_inference is synchronous and CPU/GPU-bound.
     # run_in_executor dispatches it to a thread-pool so the async event
     # loop (and all other concurrent requests) are never blocked.
-    loop = asyncio.get_event_loop()
+    #
+    # FIX B3: asyncio.get_event_loop() is deprecated in Python 3.10+.
+    #         asyncio.get_running_loop() is the correct replacement inside
+    #         an async function and raises RuntimeError (not a silent no-op)
+    #         if called outside a running loop.
+    loop = asyncio.get_running_loop()
     result = await loop.run_in_executor(
         None, model_service.run_inference, img_bgr
     )

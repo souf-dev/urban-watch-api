@@ -4,6 +4,8 @@ Image utilities — draw detections on images and persist results.
 
 from __future__ import annotations
 
+import uuid
+
 import cv2
 import numpy as np
 
@@ -15,7 +17,7 @@ _COLOURS: list[tuple[int, int, int]] = [
     (0, 0, 255),      # red
     (0, 165, 255),    # orange
     (83, 200, 0),     # green (#00C853)
-    (0, 255, 0),      # green
+    (0, 255, 0),      # lime
     (255, 0, 0),      # blue
     (255, 0, 255),    # magenta
 ]
@@ -81,8 +83,16 @@ def draw_detections(
 # ──────────────────────────────────────────────
 
 def save_result_image(image: np.ndarray, prefix: str = "result") -> str:
-    """Save an annotated image to the outputs directory. Returns the relative path."""
-    filename = f"{prefix}.png"
+    """
+    Save an annotated image to the outputs directory.
+
+    FIX B5: the filename now includes a short UUID so concurrent requests
+    each write their own file instead of overwriting the shared result.png.
+
+    Returns the relative path served by the /outputs static mount.
+    """
+    unique_id = uuid.uuid4().hex[:12]
+    filename = f"{prefix}_{unique_id}.png"
     filepath = OUTPUTS_DIR / filename
     cv2.imwrite(str(filepath), image)
     return f"outputs/{filename}"
